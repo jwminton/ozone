@@ -30,6 +30,7 @@ import org.apache.hadoop.hdds.scm.ScmConfig;
 import org.apache.hadoop.hdds.scm.ScmConfigKeys;
 import org.apache.hadoop.hdds.scm.block.DeletedBlockLogImpl;
 import org.apache.hadoop.hdds.scm.block.SCMBlockDeletingService;
+import org.apache.hadoop.hdds.scm.block.ScmBlockDeletingServiceMetrics;
 import org.apache.hadoop.hdds.scm.container.ContainerInfo;
 import org.apache.hadoop.hdds.scm.container.ReplicationManager;
 import org.apache.hadoop.hdds.scm.server.StorageContainerManager;
@@ -103,6 +104,7 @@ public class TestBlockDeletion {
   private Set<Long> containerIdsWithDeletedBlocks;
   private long maxTransactionId = 0;
   private File baseDir;
+  private ScmBlockDeletingServiceMetrics metrics;
 
   @Before
   public void init() throws Exception {
@@ -153,6 +155,8 @@ public class TestBlockDeletion {
     om = cluster.getOzoneManager();
     scm = cluster.getStorageContainerManager();
     containerIdsWithDeletedBlocks = new HashSet<>();
+    metrics = scm.getScmBlockManager().getSCMBlockDeletingService()
+        .getMetrics();
   }
 
   @After
@@ -209,6 +213,8 @@ public class TestBlockDeletion {
     // NOTE: this test assumes that all the container is KetValueContainer. If
     // other container types is going to be added, this test should be checked.
     matchContainerTransactionIds();
+
+    Assert.assertEquals(0L, metrics.getNumBlockDeletionTransactionCreated());
     om.deleteKey(keyArgs);
     Thread.sleep(5000);
     // The blocks should not be deleted in the DN as the container is open
@@ -220,6 +226,7 @@ public class TestBlockDeletion {
       Assert.assertEquals(e.getClass(), AssertionError.class);
     }
 
+    Assert.assertEquals(0L, metrics.getNumBlockDeletionTransactionSent());
     // close the containers which hold the blocks for the key
     OzoneTestUtils.closeAllContainers(scm.getEventQueue(), scm);
     Thread.sleep(2000);
@@ -264,6 +271,15 @@ public class TestBlockDeletion {
         return false;
       }
     }, 500, 10000);
+    Assert.assertTrue(metrics.getNumBlockDeletionTransactionCreated() ==
+            metrics.getNumBlockDeletionTransactionCompleted());
+    Assert.assertTrue(metrics.getNumBlockDeletionCommandSent() >=
+        metrics.getNumBlockDeletionCommandSuccess() +
+            metrics.getBNumBlockDeletionCommandFailure());
+    Assert.assertTrue(metrics.getNumBlockDeletionTransactionSent() >=
+        metrics.getNumBlockDeletionTransactionFailure() +
+            metrics.getNumBlockDeletionTransactionSuccess());
+    LOG.info(metrics.toString());
   }
 
   @Test
@@ -335,9 +351,7 @@ public class TestBlockDeletion {
     });
 
     cluster.shutdownHddsDatanode(0);
-    scm.getReplicationManager().processContainersNow();
-    // Wait for container state change to DELETING
-    Thread.sleep(100);
+    scm.getReplicationManager().processAll();
     containerInfos = scm.getContainerManager().getContainers();
     containerInfos.stream().forEach(container ->
         Assert.assertEquals(HddsProtos.LifeCycleState.DELETING,
@@ -346,17 +360,13 @@ public class TestBlockDeletion {
         LogCapturer.captureLogs(ReplicationManager.LOG);
     logCapturer.clearOutput();
 
-    scm.getReplicationManager().processContainersNow();
-    Thread.sleep(100);
-    // Wait for delete replica command resend
+    scm.getReplicationManager().processAll();
     GenericTestUtils.waitFor(() -> logCapturer.getOutput()
         .contains("Resend delete Container"), 500, 5000);
     cluster.restartHddsDatanode(0, true);
     Thread.sleep(100);
 
-    scm.getReplicationManager().processContainersNow();
-    // Wait for container state change to DELETED
-    Thread.sleep(100);
+    scm.getReplicationManager().processAll();
     containerInfos = scm.getContainerManager().getContainers();
     containerInfos.stream().forEach(container -> {
       Assert.assertEquals(HddsProtos.LifeCycleState.DELETED,
@@ -369,6 +379,7 @@ public class TestBlockDeletion {
         Assert.fail("Container from SCM DB should be marked as DELETED");
       }
     });
+    LOG.info(metrics.toString());
   }
 
   private void verifyTransactionsCommitted() throws IOException {

@@ -30,7 +30,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.StringJoiner;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -41,6 +40,7 @@ import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.apache.commons.lang3.tuple.ImmutablePair;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.hadoop.hdds.HddsConfigKeys;
@@ -57,6 +57,7 @@ import org.apache.hadoop.hdds.protocol.proto.
     StorageContainerDatanodeProtocolProtos.ContainerReplicaProto.State;
 import org.apache.hadoop.hdds.scm.ContainerPlacementStatus;
 import org.apache.hadoop.hdds.scm.PlacementPolicy;
+import org.apache.hadoop.hdds.scm.container.replication.ReplicationManagerMetrics;
 import org.apache.hadoop.hdds.scm.events.SCMEvents;
 import org.apache.hadoop.hdds.scm.ha.SCMContext;
 import org.apache.hadoop.hdds.scm.ha.SCMService;
@@ -66,10 +67,6 @@ import org.apache.hadoop.hdds.scm.node.NodeStatus;
 import org.apache.hadoop.hdds.scm.node.states.NodeNotFoundException;
 import org.apache.hadoop.hdds.scm.server.StorageContainerManager;
 import org.apache.hadoop.hdds.server.events.EventPublisher;
-import org.apache.hadoop.metrics2.MetricsCollector;
-import org.apache.hadoop.metrics2.MetricsInfo;
-import org.apache.hadoop.metrics2.MetricsSource;
-import org.apache.hadoop.metrics2.lib.DefaultMetricsSystem;
 import org.apache.hadoop.ozone.common.statemachine.InvalidStateTransitionException;
 import org.apache.hadoop.ozone.protocol.commands.CloseContainerCommand;
 import org.apache.hadoop.ozone.protocol.commands.CommandForDatanode;
@@ -78,9 +75,7 @@ import org.apache.hadoop.ozone.protocol.commands.ReplicateContainerCommand;
 import org.apache.hadoop.ozone.protocol.commands.SCMCommand;
 import org.apache.hadoop.util.ExitUtil;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.google.protobuf.GeneratedMessage;
-import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import static org.apache.hadoop.hdds.conf.ConfigTag.OZONE;
 import static org.apache.hadoop.hdds.conf.ConfigTag.SCM;
 
@@ -94,7 +89,7 @@ import org.slf4j.LoggerFactory;
  * that the containers are properly replicated. Replication Manager deals only
  * with Quasi Closed / Closed container.
  */
-public class ReplicationManager implements MetricsSource, SCMService {
+public class ReplicationManager implements SCMService {
 
   public static final Logger LOG =
       LoggerFactory.getLogger(ReplicationManager.class);
@@ -172,6 +167,8 @@ public class ReplicationManager implements MetricsSource, SCMService {
     REPLICATION_FAIL_NODE_NOT_IN_SERVICE,
     // replication fail because node is unhealthy
     REPLICATION_FAIL_NODE_UNHEALTHY,
+    // deletion fail because of node is not in service
+    DELETION_FAIL_NODE_NOT_IN_SERVICE,
     // replication succeed, but deletion fail because of timeout
     DELETION_FAIL_TIME_OUT,
     // replication succeed, but deletion fail because because
@@ -231,6 +228,11 @@ public class ReplicationManager implements MetricsSource, SCMService {
   private final Clock clock;
 
   /**
+   * Replication progress related metrics.
+   */
+  private ReplicationManagerMetrics metrics;
+
+  /**
    * Constructs ReplicationManager instance with the given configuration.
    *
    * @param conf OzoneConfiguration
@@ -265,6 +267,7 @@ public class ReplicationManager implements MetricsSource, SCMService {
         HddsConfigKeys.HDDS_SCM_WAIT_TIME_AFTER_SAFE_MODE_EXIT,
         HddsConfigKeys.HDDS_SCM_WAIT_TIME_AFTER_SAFE_MODE_EXIT_DEFAULT,
         TimeUnit.MILLISECONDS);
+    this.metrics = null;
 
     // register ReplicationManager to SCMServiceManager.
     serviceManager.register(this);
@@ -279,10 +282,7 @@ public class ReplicationManager implements MetricsSource, SCMService {
   @Override
   public synchronized void start() {
     if (!isRunning()) {
-      DefaultMetricsSystem.instance().register(METRICS_SOURCE_NAME,
-          "SCM Replication manager (closed container replication) related "
-              + "metrics",
-          this);
+      metrics = ReplicationManagerMetrics.create(this);
       LOG.info("Starting Replication Monitor Thread.");
       running = true;
       replicationMonitor = new Thread(this::run);
@@ -310,16 +310,6 @@ public class ReplicationManager implements MetricsSource, SCMService {
   }
 
   /**
-   * Process all the containers immediately.
-   */
-  @VisibleForTesting
-  @SuppressFBWarnings(value="NN_NAKED_NOTIFY",
-      justification="Used only for testing")
-  public synchronized void processContainersNow() {
-    notifyAll();
-  }
-
-  /**
    * Stops Replication Monitor thread.
    */
   public synchronized void stop() {
@@ -331,11 +321,26 @@ public class ReplicationManager implements MetricsSource, SCMService {
       inflightMove.clear();
       inflightMoveFuture.clear();
       running = false;
-      DefaultMetricsSystem.instance().unregisterSource(METRICS_SOURCE_NAME);
+      metrics.unRegister();
       notifyAll();
     } else {
       LOG.info("Replication Monitor Thread is not running.");
     }
+  }
+
+  /**
+   * Process all the containers now, and wait for the processing to complete.
+   * This in intended to be used in tests.
+   */
+  public synchronized void processAll() {
+    final long start = clock.millis();
+    final List<ContainerInfo> containers =
+        containerManager.getContainers();
+    containers.forEach(this::processContainer);
+
+    LOG.info("Replication Monitor Thread took {} milliseconds for" +
+            " processing {} containers.", clock.millis() - start,
+        containers.size());
   }
 
   /**
@@ -345,15 +350,7 @@ public class ReplicationManager implements MetricsSource, SCMService {
   private synchronized void run() {
     try {
       while (running) {
-        final long start = clock.millis();
-        final List<ContainerInfo> containers =
-            containerManager.getContainers();
-        containers.forEach(this::processContainer);
-
-        LOG.info("Replication Monitor Thread took {} milliseconds for" +
-                " processing {} containers.", clock.millis() - start,
-            containers.size());
-
+        processAll();
         wait(rmConf.getInterval());
       }
     } catch (Throwable t) {
@@ -423,12 +420,20 @@ public class ReplicationManager implements MetricsSource, SCMService {
          */
         updateInflightAction(container, inflightReplication,
             action -> replicas.stream()
-                .anyMatch(r -> r.getDatanodeDetails().equals(action.datanode)));
+                .anyMatch(r -> r.getDatanodeDetails().equals(action.datanode)),
+            ()-> metrics.incrNumReplicationCmdsTimeout(),
+            () -> {
+              metrics.incrNumReplicationCmdsCompleted();
+              metrics.incrNumReplicationBytesCompleted(
+                  container.getUsedBytes());
+            });
 
         updateInflightAction(container, inflightDeletion,
             action -> replicas.stream()
                 .noneMatch(r ->
-                    r.getDatanodeDetails().equals(action.datanode)));
+                    r.getDatanodeDetails().equals(action.datanode)),
+            () -> metrics.incrNumDeletionCmdsTimeout(),
+            () -> metrics.incrNumDeletionCmdsCompleted());
 
         /*
          * If container is under deleting and all it's replicas are deleted,
@@ -510,10 +515,14 @@ public class ReplicationManager implements MetricsSource, SCMService {
    * @param container Container to update
    * @param inflightActions inflightReplication (or) inflightDeletion
    * @param filter filter to check if the operation is completed
+   * @param timeoutCounter update timeout metrics
+   * @param completedCounter update completed metrics
    */
   private void updateInflightAction(final ContainerInfo container,
       final Map<ContainerID, List<InflightAction>> inflightActions,
-      final Predicate<InflightAction> filter) {
+      final Predicate<InflightAction> filter,
+      final Runnable timeoutCounter,
+      final Runnable completedCounter) {
     final ContainerID id = container.containerID();
     final long deadline = clock.millis() - rmConf.getEventTimeout();
     if (inflightActions.containsKey(id)) {
@@ -531,8 +540,15 @@ public class ReplicationManager implements MetricsSource, SCMService {
               NodeOperationalState.IN_SERVICE;
           if (isCompleted || isUnhealthy || isTimeout || isNotInService) {
             iter.remove();
+
+            if (isTimeout) {
+              timeoutCounter.run();
+            } else if (isCompleted) {
+              completedCounter.run();
+            }
+
             updateMoveIfNeeded(isUnhealthy, isCompleted, isTimeout,
-                container, a.datanode, inflightActions);
+                isNotInService, container, a.datanode, inflightActions);
           }
         } catch (NodeNotFoundException | ContainerNotFoundException e) {
           // Should not happen, but if it does, just remove the action as the
@@ -558,6 +574,7 @@ public class ReplicationManager implements MetricsSource, SCMService {
    */
   private void updateMoveIfNeeded(final boolean isUnhealthy,
                    final boolean isCompleted, final boolean isTimeout,
+                   final boolean isNotInService,
                    final ContainerInfo container, final DatanodeDetails dn,
                    final Map<ContainerID,
                        List<InflightAction>> inflightActions)
@@ -613,6 +630,9 @@ public class ReplicationManager implements MetricsSource, SCMService {
         if (isUnhealthy) {
           inflightMoveFuture.get(id).complete(
               MoveResult.REPLICATION_FAIL_NODE_UNHEALTHY);
+        } else if (isNotInService) {
+          inflightMoveFuture.get(id).complete(
+              MoveResult.REPLICATION_FAIL_NODE_NOT_IN_SERVICE);
         } else {
           inflightMoveFuture.get(id).complete(
               MoveResult.REPLICATION_FAIL_TIME_OUT);
@@ -624,6 +644,9 @@ public class ReplicationManager implements MetricsSource, SCMService {
         } else if (isTimeout) {
           inflightMoveFuture.get(id).complete(
               MoveResult.DELETION_FAIL_TIME_OUT);
+        } else if (isNotInService) {
+          inflightMoveFuture.get(id).complete(
+              MoveResult.DELETION_FAIL_NODE_NOT_IN_SERVICE);
         } else {
           inflightMoveFuture.get(id).complete(
               MoveResult.COMPLETED);
@@ -1294,7 +1317,8 @@ public class ReplicationManager implements MetricsSource, SCMService {
   private boolean isPlacementStatusActuallyEqual(
                       ContainerPlacementStatus cps1,
                       ContainerPlacementStatus cps2) {
-    return cps1.actualPlacementCount() == cps2.actualPlacementCount() ||
+    return (!cps1.isPolicySatisfied() &&
+        cps1.actualPlacementCount() == cps2.actualPlacementCount()) ||
         cps1.isPolicySatisfied() && cps2.isPolicySatisfied();
   }
 
@@ -1434,6 +1458,9 @@ public class ReplicationManager implements MetricsSource, SCMService {
     inflightReplication.computeIfAbsent(id, k -> new ArrayList<>());
     sendAndTrackDatanodeCommand(datanode, replicateCommand,
         action -> inflightReplication.get(id).add(action));
+
+    metrics.incrNumReplicationCmdsSent();
+    metrics.incrNumReplicationBytesTotal(container.getUsedBytes());
   }
 
   /**
@@ -1457,6 +1484,8 @@ public class ReplicationManager implements MetricsSource, SCMService {
     inflightDeletion.computeIfAbsent(id, k -> new ArrayList<>());
     sendAndTrackDatanodeCommand(datanode, deleteCommand,
         action -> inflightDeletion.get(id).add(action));
+
+    metrics.incrNumDeletionCmdsSent();
   }
 
   /**
@@ -1542,22 +1571,10 @@ public class ReplicationManager implements MetricsSource, SCMService {
         .allMatch(r -> ReplicationManager.compareState(state, r.getState()));
   }
 
-  @Override
-  public void getMetrics(MetricsCollector collector, boolean all) {
-    collector.addRecord(ReplicationManager.class.getSimpleName())
-        .addGauge(ReplicationManagerMetrics.INFLIGHT_REPLICATION,
-            inflightReplication.size())
-        .addGauge(ReplicationManagerMetrics.INFLIGHT_DELETION,
-            inflightDeletion.size())
-        .addGauge(ReplicationManagerMetrics.INFLIGHT_MOVE,
-            inflightMove.size())
-        .endRecord();
-  }
-
   /**
    * Wrapper class to hold the InflightAction with its start time.
    */
-  private static final class InflightAction {
+  static final class InflightAction {
 
     private final DatanodeDetails datanode;
     private final long time;
@@ -1566,6 +1583,11 @@ public class ReplicationManager implements MetricsSource, SCMService {
                            final long time) {
       this.datanode = datanode;
       this.time = time;
+    }
+
+    @VisibleForTesting
+    public DatanodeDetails getDatanode() {
+      return datanode;
     }
   }
 
@@ -1640,35 +1662,6 @@ public class ReplicationManager implements MetricsSource, SCMService {
     }
   }
 
-  /**
-   * Metric name definitions for Replication manager.
-   */
-  public enum ReplicationManagerMetrics implements MetricsInfo {
-
-    INFLIGHT_REPLICATION("Tracked inflight container replication requests."),
-    INFLIGHT_DELETION("Tracked inflight container deletion requests."),
-    INFLIGHT_MOVE("Tracked inflight container move requests.");
-
-    private final String desc;
-
-    ReplicationManagerMetrics(String desc) {
-      this.desc = desc;
-    }
-
-    @Override
-    public String description() {
-      return desc;
-    }
-
-    @Override
-    public String toString() {
-      return new StringJoiner(", ", this.getClass().getSimpleName() + "{", "}")
-          .add("name=" + name())
-          .add("description=" + desc)
-          .toString();
-    }
-  }
-
   @Override
   public void notifyStatusChanged() {
     serviceLock.lock();
@@ -1705,5 +1698,22 @@ public class ReplicationManager implements MetricsSource, SCMService {
   @Override
   public String getServiceName() {
     return ReplicationManager.class.getSimpleName();
+  }
+
+  public ReplicationManagerMetrics getMetrics() {
+    return this.metrics;
+  }
+
+  public Map<ContainerID, List<InflightAction>> getInflightReplication() {
+    return inflightReplication;
+  }
+
+  public Map<ContainerID, List<InflightAction>> getInflightDeletion() {
+    return inflightDeletion;
+  }
+
+  public Map<ContainerID,
+      Pair<DatanodeDetails, DatanodeDetails>> getInflightMove() {
+    return inflightMove;
   }
 }
