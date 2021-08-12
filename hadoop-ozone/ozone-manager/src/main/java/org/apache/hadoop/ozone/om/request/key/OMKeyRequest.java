@@ -28,6 +28,7 @@ import java.util.Collections;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import com.google.common.base.Optional;
 import com.google.common.base.Preconditions;
@@ -549,16 +550,15 @@ public abstract class OMKeyRequest extends OMClientRequest {
    * @return the number of bytes used by blocks pointed to by {@code omKeyInfo}.
    */
   protected static long sumBlockLengths(OmKeyInfo omKeyInfo) {
-    long bytesUsed = 0;
     int keyFactor = omKeyInfo.getReplicationConfig().getRequiredNodes();
     OmKeyLocationInfoGroup keyLocationGroup =
         omKeyInfo.getLatestVersionLocations();
 
-    for(OmKeyLocationInfo locationInfo: keyLocationGroup.getLocationList()) {
-      bytesUsed += locationInfo.getLength() * keyFactor;
-    }
-
-    return bytesUsed;
+    return keyLocationGroup.getLocationLists()
+        .stream()
+        .flatMap(List::stream)
+        .mapToLong(OmKeyLocationInfo::getLength)
+        .sum() * keyFactor;
   }
 
   /**
