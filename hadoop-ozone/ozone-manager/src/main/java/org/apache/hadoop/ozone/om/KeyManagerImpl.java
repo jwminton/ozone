@@ -735,12 +735,11 @@ public class KeyManagerImpl implements KeyManager {
     if (grpcBlockTokenEnabled) {
       String remoteUser = getRemoteUser().getShortUserName();
       for (OmKeyLocationInfoGroup key : value.getKeyLocationVersions()) {
-        key.getLocationLists().forEach(sublist -> {
-          sublist.forEach(k -> {
-            k.setToken(secretManager.generateToken(remoteUser, k.getBlockID(),
-                    EnumSet.of(READ), k.getLength()));
-          });
-        });
+        key.getLocationLists().stream().flatMap(List::stream)
+            .forEach(k -> {
+              k.setToken(secretManager.generateToken(remoteUser, k.getBlockID(),
+                      EnumSet.of(READ), k.getLength()));
+            });
       }
     }
   }
@@ -2944,30 +2943,28 @@ public class KeyManagerImpl implements KeyManager {
           LOG.warn("No location for key {}", keyInfo);
           continue;
         }
-        key.getLocationLists().forEach(sublist -> {
-          for (OmKeyLocationInfo k : sublist) {
-            Pipeline pipeline = k.getPipeline();
-            List<DatanodeDetails> nodes = pipeline.getNodes();
-            List<String> uuidList = toNodeUuid(nodes);
-            Set<String> uuidSet = new HashSet<>(uuidList);
-            List<DatanodeDetails> sortedNodes = sortedPipelines.get(uuidSet);
-            if (sortedNodes == null) {
-              if (nodes.isEmpty()) {
-                LOG.warn("No datanodes in pipeline {}", pipeline.getId());
-                continue;
-              }
-              sortedNodes = sortDatanodes(clientMachine, nodes, keyInfo,
-                      uuidList);
-              if (sortedNodes != null) {
-                sortedPipelines.put(uuidSet, sortedNodes);
-              }
-            } else if (LOG.isDebugEnabled()) {
-              LOG.debug("Found sorted datanodes for pipeline {} and client {} "
-                      + "in cache", pipeline.getId(), clientMachine);
+        for (OmKeyLocationInfo k : key.getLocationList()) {
+          Pipeline pipeline = k.getPipeline();
+          List<DatanodeDetails> nodes = pipeline.getNodes();
+          List<String> uuidList = toNodeUuid(nodes);
+          Set<String> uuidSet = new HashSet<>(uuidList);
+          List<DatanodeDetails> sortedNodes = sortedPipelines.get(uuidSet);
+          if (sortedNodes == null) {
+            if (nodes.isEmpty()) {
+              LOG.warn("No datanodes in pipeline {}", pipeline.getId());
+              continue;
             }
-            pipeline.setNodesInOrder(sortedNodes);
+            sortedNodes = sortDatanodes(clientMachine, nodes, keyInfo,
+                uuidList);
+            if (sortedNodes != null) {
+              sortedPipelines.put(uuidSet, sortedNodes);
+            }
+          } else if (LOG.isDebugEnabled()) {
+            LOG.debug("Found sorted datanodes for pipeline {} and client {} "
+                + "in cache", pipeline.getId(), clientMachine);
           }
-        });
+          pipeline.setNodesInOrder(sortedNodes);
+        }
       }
     }
   }
