@@ -31,6 +31,7 @@ import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos
 import org.apache.hadoop.hdds.utils.db.BatchOperation;
 
 import java.io.IOException;
+import java.util.List;
 import javax.annotation.Nullable;
 import javax.annotation.Nonnull;
 
@@ -161,7 +162,10 @@ public abstract class AbstractOMKeyDeleteResponse extends OMClientResponse {
     }
     for (OmKeyLocationInfoGroup keyLocationList : keyInfo
             .getKeyLocationVersions()) {
-      if (keyLocationList.getLocationListCount() != 0) {
+      if (keyLocationList.getLocationLists()
+          .stream()
+          .flatMap(List::stream)
+          .findFirst().isPresent()) {
         return false;
       }
     }

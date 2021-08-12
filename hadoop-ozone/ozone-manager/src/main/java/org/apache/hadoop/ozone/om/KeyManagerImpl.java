@@ -941,7 +941,10 @@ public class KeyManagerImpl implements KeyManager {
   private boolean isKeyEmpty(OmKeyInfo keyInfo) {
     for (OmKeyLocationInfoGroup keyLocationList : keyInfo
         .getKeyLocationVersions()) {
-      if (keyLocationList.getLocationListCount() != 0) {
+      if (keyLocationList.getLocationLists()
+          .stream()
+          .flatMap(List::stream)
+          .findFirst().isPresent()) {
         return false;
       }
     }
