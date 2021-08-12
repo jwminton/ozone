@@ -28,6 +28,8 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import org.apache.hadoop.hdds.client.ReplicationConfig;
 import org.apache.hadoop.hdds.protocol.proto.HddsProtos;
@@ -472,10 +474,13 @@ public class S3MultipartUploadCompleteRequest extends OMKeyRequest {
           .getKeyLocationVersions().get(0);
 
       // Set partNumber in each block.
-      currentKeyInfoGroup.getLocationList().forEach(
-          omKeyLocationInfo -> omKeyLocationInfo.setPartNumber(partNumber));
+      Stream<OmKeyLocationInfo> flatMap =
+          currentKeyInfoGroup.getLocationLists().stream()
+            .flatMap(List::stream);
+      flatMap.forEach(omKeyLocationInfo ->
+          omKeyLocationInfo.setPartNumber(partNumber));
 
-      partLocationInfos.addAll(currentKeyInfoGroup.getLocationList());
+      partLocationInfos.addAll(flatMap.collect(Collectors.toList()));
       dataSize += currentPartKeyInfo.getDataSize();
     }
     return dataSize;

@@ -98,6 +98,7 @@ public class OmKeyLocationInfoGroup {
    * Use getLocationLists() instead.
    * @return a list of OmKeyLocationInfo
    */
+  @Deprecated
   public List<OmKeyLocationInfo> getLocationList() {
     return locationVersionMap.values().stream().flatMap(List::stream)
         .collect(Collectors.toList());
