@@ -251,7 +251,7 @@ public class TestBlockDeletion {
         LOG.warn("Verify blocks deletion failed", t);
         return false;
       }
-    }, 2000, 30000);
+    }, 2000, 60000);
 
     // Few containers with deleted blocks
     Assert.assertTrue(!containerIdsWithDeletedBlocks.isEmpty());
