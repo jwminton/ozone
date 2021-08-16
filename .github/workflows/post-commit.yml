@@ -380,7 +380,6 @@ jobs:
           rm -rf ~/.m2/repository/org/apache/ozone/hdds*
           rm -rf ~/.m2/repository/org/apache/ozone/ozone*
         if: always()
-	
   coverage:
     runs-on: ubuntu-18.04
     timeout-minutes: 30
