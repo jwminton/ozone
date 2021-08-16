@@ -25,6 +25,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * A list of key locations. This class represents one single version of the
@@ -101,6 +102,10 @@ public class OmKeyLocationInfoGroup {
   public List<OmKeyLocationInfo> getLocationList() {
     return locationVersionMap.values().stream().flatMap(List::stream)
         .collect(Collectors.toList());
+  }
+
+  public Stream<OmKeyLocationInfo> getLocationStream() {
+    return locationVersionMap.values().stream().flatMap(List::stream);
   }
 
   public Collection<List<OmKeyLocationInfo>> getLocationLists() {

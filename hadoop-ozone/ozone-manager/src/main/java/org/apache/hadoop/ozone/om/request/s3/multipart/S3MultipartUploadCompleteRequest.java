@@ -472,8 +472,7 @@ public class S3MultipartUploadCompleteRequest extends OMKeyRequest {
           .getKeyLocationVersions().get(0);
 
       // Set partNumber in each block.
-      currentKeyInfoGroup.getLocationLists().stream()
-          .flatMap(List::stream)
+      currentKeyInfoGroup.getLocationStream()
           .forEach(omKeyLocationInfo ->
               omKeyLocationInfo.setPartNumber(partNumber));
 

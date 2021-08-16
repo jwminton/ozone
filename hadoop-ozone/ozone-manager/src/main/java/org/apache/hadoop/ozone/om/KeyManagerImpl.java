@@ -735,11 +735,10 @@ public class KeyManagerImpl implements KeyManager {
     if (grpcBlockTokenEnabled) {
       String remoteUser = getRemoteUser().getShortUserName();
       for (OmKeyLocationInfoGroup key : value.getKeyLocationVersions()) {
-        key.getLocationLists().stream().flatMap(List::stream)
-            .forEach(k -> {
-              k.setToken(secretManager.generateToken(remoteUser, k.getBlockID(),
-                      EnumSet.of(READ), k.getLength()));
-            });
+        key.getLocationStream().forEach(k -> {
+          k.setToken(secretManager.generateToken(remoteUser, k.getBlockID(),
+              EnumSet.of(READ), k.getLength()));
+        });
       }
     }
   }

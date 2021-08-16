@@ -553,9 +553,7 @@ public abstract class OMKeyRequest extends OMClientRequest {
     OmKeyLocationInfoGroup keyLocationGroup =
         omKeyInfo.getLatestVersionLocations();
 
-    return keyLocationGroup.getLocationLists()
-        .stream()
-        .flatMap(List::stream)
+    return keyLocationGroup.getLocationStream()
         .mapToLong(OmKeyLocationInfo::getLength)
         .sum() * keyFactor;
   }

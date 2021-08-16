@@ -99,9 +99,7 @@ public class ContainerMapper {
                 OzoneManagerProtocolProtos.KeyInfo.parseFrom(value));
             for (OmKeyLocationInfoGroup keyLocationInfoGroup : keyInfo
                 .getKeyLocationVersions()) {
-              keyLocationInfoGroup.getLocationLists()
-                  .stream()
-                  .flatMap(List::stream)
+              keyLocationInfoGroup.getLocationStream()
                   .forEach(keyLocation -> {
                     BlockIdDetails blockIdDetails = new BlockIdDetails();
                     Map<Long, BlockIdDetails> innerMap = new HashMap<>();
