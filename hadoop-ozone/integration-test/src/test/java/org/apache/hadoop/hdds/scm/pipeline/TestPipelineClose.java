@@ -204,6 +204,7 @@ public class TestPipelineClose {
   }
 
   @Test
+  @Ignore("JWM Exp")
   public void testPipelineCloseWithLogFailure() throws IOException {
 
     EventQueue eventQ = (EventQueue) scm.getEventQueue();
