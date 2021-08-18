@@ -48,6 +48,7 @@ import org.apache.ratis.server.protocol.TermIndex;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.assertFalse;
 
+import org.junit.Ignore;
 import org.junit.Assert;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -158,6 +159,7 @@ public class TestSCMInstallSnapshotWithHA {
   }
 
   @Test
+  @Ignore("JWM Exp")
   public void testInstallOldCheckpointFailure() throws Exception {
     // Get the leader SCM
     StorageContainerManager leaderSCM = getLeader(cluster);
