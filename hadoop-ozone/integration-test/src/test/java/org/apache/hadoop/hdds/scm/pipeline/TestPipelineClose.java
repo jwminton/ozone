@@ -242,7 +242,7 @@ public class TestPipelineClose {
     xceiverRatis.handleNodeLogFailure(groupId, null);
 
     // verify SCM receives a pipeline action report "immediately"
-    Mockito.verify(pipelineActionTest, Mockito.timeout(300))
+    Mockito.verify(pipelineActionTest, Mockito.timeout(100))
         .onMessage(
             actionCaptor.capture(),
             Mockito.any(EventPublisher.class));
