@@ -147,7 +147,7 @@ public class TestBlockDeletion {
     conf.setQuietMode(false);
     conf.setTimeDuration("hdds.scm.replication.event.timeout", 100,
         TimeUnit.MILLISECONDS);
-    conf.setInt("hdds.datanode.block.delete.threads.max", 5);
+    conf.setInt("hdds.datanode.block.delete.threads.max", 6);
     cluster = MiniOzoneCluster.newBuilder(conf)
         .setNumDatanodes(3)
         .setHbInterval(200)
