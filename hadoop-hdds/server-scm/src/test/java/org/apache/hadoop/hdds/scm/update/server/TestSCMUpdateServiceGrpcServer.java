@@ -28,7 +28,6 @@ import org.apache.ozone.test.GenericTestUtils;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
-import org.junit.Ignore;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
@@ -146,7 +145,6 @@ public class TestSCMUpdateServiceGrpcServer {
     }
   }
 
-  @Ignore("HDDS-5319")
   @Test
   public void testClientUpdateWithDelayedRevoke() throws Exception {
     OzoneConfiguration conf = new OzoneConfiguration();
@@ -188,9 +186,9 @@ public class TestSCMUpdateServiceGrpcServer {
       server.notifyCrlUpdate();
       GenericTestUtils.waitFor(() -> client.getUpdateCount()>1,
           100, 2000);
-      Assert.assertEquals(2, client.getUpdateCount());
+      Assert.assertTrue(2 <= client.getUpdateCount());
       Assert.assertEquals(0, client.getErrorCount());
-      Assert.assertEquals(1, client.getClientCRLStore()
+      Assert.assertTrue(1 >= client.getClientCRLStore()
           .getPendingCrlIds().size());
 
       GenericTestUtils.waitFor(() -> client.getPendingCrlRemoveCount()==1,
@@ -218,7 +216,6 @@ public class TestSCMUpdateServiceGrpcServer {
     return crlId.get();
   }
 
-  @Ignore("HDDS-5319")
   @Test
   public void testClientUpdateWithRestart() throws Exception {
     OzoneConfiguration conf = new OzoneConfiguration();
@@ -282,14 +279,14 @@ public class TestSCMUpdateServiceGrpcServer {
       client.createChannel();
       client.start();
       Assert.assertEquals(5, clientCRLStore.getLatestCrlId());
-      GenericTestUtils.waitFor(() -> client.getUpdateCount()>4,
+      GenericTestUtils.waitFor(() -> client.getUpdateCount()>5,
           100, 2000);
       revokeCertNow(certIds.get(6));
       // mostly noop
       server.notifyCrlUpdate();
       LOG.info("Test client restart end.");
 
-      GenericTestUtils.waitFor(() -> client.getUpdateCount()>5,
+      GenericTestUtils.waitFor(() -> client.getUpdateCount()>6,
           100, 2000);
       Assert.assertTrue(client.getUpdateCount()>=6);
       Assert.assertEquals(2, client.getErrorCount());
